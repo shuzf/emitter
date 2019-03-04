@@ -15,6 +15,7 @@ import (
 	"github.com/emitter-io/emitter/internal/network/mqtt"
 	"github.com/emitter-io/emitter/internal/provider/contract"
 	secmock "github.com/emitter-io/emitter/internal/provider/contract/mock"
+	"github.com/emitter-io/emitter/internal/provider/storage"
 	"github.com/emitter-io/emitter/internal/provider/usage"
 	"github.com/emitter-io/emitter/internal/security"
 	"github.com/stretchr/testify/assert"
@@ -143,6 +144,8 @@ func TestPubsub(t *testing.T) {
 	// Start the broker asynchronously
 	broker, svcErr := NewService(context.Background(), cfg)
 	broker.contracts = contract.NewSingleContractProvider(broker.License, usage.NewNoop())
+	broker.storage = storage.NewInMemory(broker)
+	broker.storage.Configure(nil)
 	assert.NoError(t, svcErr)
 	defer broker.Close()
 	go broker.Listen()
@@ -160,7 +163,7 @@ func TestPubsub(t *testing.T) {
 	}
 
 	{ // Read connack
-		pkt, err := mqtt.DecodePacket(cli)
+		pkt, err := mqtt.DecodePacket(cli, 65536)
 		assert.NoError(t, err)
 		assert.Equal(t, mqtt.TypeOfConnack, pkt.Type())
 	}
@@ -173,24 +176,45 @@ func TestPubsub(t *testing.T) {
 	}
 
 	{ // Read pong
-		pkt, err := mqtt.DecodePacket(cli)
+		pkt, err := mqtt.DecodePacket(cli,65536)
 		assert.NoError(t, err)
 		assert.Equal(t, mqtt.TypeOfPingresp, pkt.Type())
+	}
+
+	{ // Publish a retained message
+		msg := mqtt.Publish{
+			Header:  &mqtt.StaticHeader{QOS: 0, Retain: true},
+			Topic:   []byte("EbUlduEbUssgWueAWjkEZwdYG5YC0dGh/a/b/c/"),
+			Payload: []byte("retained message"),
+		}
+		_, err := msg.EncodeTo(cli)
+		assert.NoError(t, err)
 	}
 
 	{ // Subscribe to a topic
 		sub := mqtt.Subscribe{
 			Header: &mqtt.StaticHeader{QOS: 0},
 			Subscriptions: []mqtt.TopicQOSTuple{
-				{Topic: []byte("0Nq8SWbL8qoOKEDqh_ebBepug6cLLlWO/a/b/c/"), Qos: 0},
+				{Topic: []byte("EbUlduEbUssgWueAWjkEZwdYG5YC0dGh/a/b/c/"), Qos: 0},
 			},
 		}
 		_, err := sub.EncodeTo(cli)
 		assert.NoError(t, err)
 	}
 
+	{ // Read the retained message
+		pkt, err := mqtt.DecodePacket(cli,65536)
+		assert.NoError(t, err)
+		assert.Equal(t, mqtt.TypeOfPublish, pkt.Type())
+		assert.Equal(t, &mqtt.Publish{
+			Header:  &mqtt.StaticHeader{QOS: 0},
+			Topic:   []byte("a/b/c/"),
+			Payload: []byte("retained message"),
+		}, pkt)
+	}
+
 	{ // Read suback
-		pkt, err := mqtt.DecodePacket(cli)
+		pkt, err := mqtt.DecodePacket(cli,65536)
 		assert.NoError(t, err)
 		assert.Equal(t, mqtt.TypeOfSuback, pkt.Type())
 	}
@@ -198,7 +222,7 @@ func TestPubsub(t *testing.T) {
 	{ // Publish a message
 		msg := mqtt.Publish{
 			Header:  &mqtt.StaticHeader{QOS: 0},
-			Topic:   []byte("0Nq8SWbL8qoOKEDqh_ebBepug6cLLlWO/a/b/c/"),
+			Topic:   []byte("EbUlduEbUssgWueAWjkEZwdYG5YC0dGh/a/b/c/"),
 			Payload: []byte("hello world"),
 		}
 		_, err := msg.EncodeTo(cli)
@@ -206,7 +230,7 @@ func TestPubsub(t *testing.T) {
 	}
 
 	{ // Read the message back
-		pkt, err := mqtt.DecodePacket(cli)
+		pkt, err := mqtt.DecodePacket(cli,65536)
 		assert.NoError(t, err)
 		assert.Equal(t, mqtt.TypeOfPublish, pkt.Type())
 		assert.Equal(t, &mqtt.Publish{
@@ -219,7 +243,7 @@ func TestPubsub(t *testing.T) {
 	{ // Publish a message but ignore ourselves
 		msg := mqtt.Publish{
 			Header:  &mqtt.StaticHeader{QOS: 0},
-			Topic:   []byte("0Nq8SWbL8qoOKEDqh_ebBepug6cLLlWO/a/b/c/?me=0"),
+			Topic:   []byte("EbUlduEbUssgWueAWjkEZwdYG5YC0dGh/a/b/c/?me=0"),
 			Payload: []byte("hello world"),
 		}
 		_, err := msg.EncodeTo(cli)
@@ -230,7 +254,7 @@ func TestPubsub(t *testing.T) {
 		sub := mqtt.Unsubscribe{
 			Header: &mqtt.StaticHeader{QOS: 0},
 			Topics: []mqtt.TopicQOSTuple{
-				{Topic: []byte("0Nq8SWbL8qoOKEDqh_ebBepug6cLLlWO/a/b/c/"), Qos: 0},
+				{Topic: []byte("EbUlduEbUssgWueAWjkEZwdYG5YC0dGh/a/b/c/"), Qos: 0},
 			},
 		}
 		_, err := sub.EncodeTo(cli)
@@ -238,7 +262,7 @@ func TestPubsub(t *testing.T) {
 	}
 
 	{ // Read unsuback
-		pkt, err := mqtt.DecodePacket(cli)
+		pkt, err := mqtt.DecodePacket(cli,65536)
 		assert.NoError(t, err)
 		assert.Equal(t, mqtt.TypeOfUnsuback, pkt.Type())
 	}
@@ -254,7 +278,7 @@ func TestPubsub(t *testing.T) {
 	}
 
 	{ // Read the link response
-		pkt, err := mqtt.DecodePacket(cli)
+		pkt, err := mqtt.DecodePacket(cli,65536)
 		assert.NoError(t, err)
 		assert.Equal(t, mqtt.TypeOfPublish, pkt.Type())
 	}

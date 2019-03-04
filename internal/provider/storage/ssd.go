@@ -34,6 +34,7 @@ import (
 
 // SSD represents an SSD-optimized storage storage.
 type SSD struct {
+	retain  uint32             // The configured TTL for 'retained' messages.
 	cluster Surveyor           // The cluster surveyor.
 	db      *badger.DB         // The underlying database to use for messages.
 	cancel  context.CancelFunc // The cancellation function.
@@ -74,6 +75,7 @@ func (s *SSD) Configure(config map[string]interface{}) error {
 	opts.Dir = dir
 	opts.ValueDir = opts.Dir
 	opts.SyncWrites = false
+	opts.Truncate = true
 
 	//opts.ValueLogLoadingMode = options.FileIO
 
@@ -85,12 +87,16 @@ func (s *SSD) Configure(config map[string]interface{}) error {
 
 	// Setup the database and start GC
 	s.db = db
+	s.retain = configUint32(config, "retain", defaultRetain)
 	s.cancel = async.Repeat(context.Background(), 30*time.Minute, s.GC)
 	return nil
 }
 
 // Store appends the messages to the store.
 func (s *SSD) Store(m *message.Message) error {
+	if m.TTL == message.RetainedTTL {
+		m.TTL = s.retain
+	}
 
 	// TODO: add batching instead of storing one by one
 	return s.storeFrame(message.Frame{*m})
@@ -145,7 +151,6 @@ func (s *SSD) Query(ssid message.Ssid, from, until time.Time, limit int) (messag
 		}
 	}
 
-	match.Sort()
 	match.Limit(limit)
 	return match, nil
 }
@@ -189,7 +194,8 @@ func (s *SSD) lookup(q lookupQuery) (matches message.Frame) {
 		prefix := message.NewPrefix(q.Ssid, q.Until)
 
 		// Seek the prefix and check the key so we can quickly exit the iteration.
-		for it.Seek(prefix); it.Valid() && message.ID(it.Item().Key()).HasPrefix(q.Ssid, q.From) &&
+		for it.Seek(prefix); it.Valid() &&
+			message.ID(it.Item().Key()).HasPrefix(q.Ssid, q.From) &&
 			len(matches) < q.Limit; it.Next() {
 			if message.ID(it.Item().Key()).Match(q.Ssid, q.From, q.Until) {
 				if msg, err := loadMessage(it.Item()); err == nil {

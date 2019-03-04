@@ -59,6 +59,11 @@ func (m *Message) Contract() uint32 {
 	return m.ID.Contract()
 }
 
+// Stored returns whether the message is or should be stored.
+func (m *Message) Stored() bool {
+	return m.TTL > 0
+}
+
 // Expires calculates the expiration time.
 func (m *Message) Expires() time.Time {
 	return time.Unix(m.Time(), 0).Add(time.Second * time.Duration(m.TTL))
@@ -80,10 +85,11 @@ func (f Frame) Sort() {
 	sort.Slice(f, func(i, j int) bool { return f[i].Time() < f[j].Time() })
 }
 
-// Limit limits the frame to a specific number of elements
+// Limit takes the last N elements, sorted by message time
 func (f *Frame) Limit(n int) {
-	if len(*f) > n {
-		*f = (*f)[:n]
+	f.Sort()
+	if size := len(*f); size > n {
+		*f = (*f)[size-n:]
 	}
 }
 

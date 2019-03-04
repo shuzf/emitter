@@ -5,6 +5,7 @@ import (
 
 	"github.com/emitter-io/emitter/internal/message"
 	netmock "github.com/emitter-io/emitter/internal/network/mock"
+	"github.com/emitter-io/emitter/internal/network/mqtt"
 	"github.com/emitter-io/emitter/internal/provider/contract"
 	secmock "github.com/emitter-io/emitter/internal/provider/contract/mock"
 	"github.com/emitter-io/emitter/internal/provider/usage"
@@ -203,7 +204,7 @@ func TestHandlers_onSubscribeUnsubscribe(t *testing.T) {
 			channel := security.ParseChannel([]byte(tc.channel))
 			key, _ := s.Cipher.DecryptKey(channel.Key)
 			ssid := message.NewSsid(key.Contract(), channel.Query)
-			subscribers := s.subscriptions.Lookup(ssid)
+			subscribers := s.subscriptions.Lookup(ssid, nil)
 			assert.Equal(t, tc.subCount, len(subscribers))
 
 			// Unsubscribe and check for error.
@@ -211,7 +212,7 @@ func TestHandlers_onSubscribeUnsubscribe(t *testing.T) {
 			assert.Equal(t, tc.unsubErr, unsubErr, tc.msg)
 
 			// Search for the ssid.
-			subscribers = s.subscriptions.Lookup(ssid)
+			subscribers = s.subscriptions.Lookup(ssid, nil)
 			assert.Equal(t, tc.unsubCount, len(subscribers))
 		})
 	}
@@ -320,7 +321,11 @@ func TestHandlers_onPublish(t *testing.T) {
 		nc := s.newConn(conn.Client)
 		s.Cipher, _ = s.License.Cipher()
 
-		err := nc.onPublish([]byte(tc.channel), []byte(tc.payload), 0)
+		err := nc.onPublish(&mqtt.Publish{
+			Header:  new(mqtt.StaticHeader),
+			Topic:   []byte(tc.channel),
+			Payload: []byte(tc.payload),
+		})
 
 		assert.Equal(t, tc.err, err, tc.msg)
 	}
